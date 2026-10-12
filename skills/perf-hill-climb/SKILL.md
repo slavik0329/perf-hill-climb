@@ -18,7 +18,7 @@ Method from [How we made claude.ai faster](https://claude.dev/blog/how-we-made-c
 
 ## 1. Resume before you start
 
-A climb outlives a context window. Before measuring anything, look for what an earlier session left:
+A climb outlives a context window, so its state lives in the project's own files. Before measuring anything, look for it in the project you're working on, and nowhere else:
 
 ```bash
 git ls-files | grep -iE 'perf|budget|efficien|benchmark|wake.?report|telemetry'; git tag --sort=-creatordate | head
