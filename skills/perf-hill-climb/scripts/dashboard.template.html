@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE_TEXT__</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface-1: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11, 11, 11, 0.10);
+  --good-text: #006300; --good: #0ca30c; --critical: #d03b3b;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface-1: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, 0.10);
+    --good-text: #0ca30c;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface-1: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, 0.10);
+  --good-text: #0ca30c;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--page); color: var(--ink); }
+body { font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1120px; margin: 0 auto; padding: 24px 16px 48px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; margin-bottom: 20px; }
+h1 { font-size: 20px; font-weight: 600; margin: 0; }
+h2 { font-size: 15px; font-weight: 600; margin: 32px 0 12px; }
+.status { color: var(--ink-2); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.status.live .dot { background: var(--good); }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
+.hero { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
+.hero .figure { font-size: 56px; font-weight: 600; line-height: 1.1; }
+.hero .sub { color: var(--ink-2); max-width: 60ch; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 12px; }
+.tile .label { color: var(--ink-2); font-size: 13px; overflow-wrap: anywhere; }
+.tile .value { font-size: 28px; font-weight: 600; margin: 2px 0; }
+.delta { font-size: 13px; color: var(--ink-2); }
+.delta .arrow.good { color: var(--good-text); }
+.delta .arrow.bad { color: var(--critical); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: 12px; }
+.chart-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.chart-title { font-weight: 600; overflow-wrap: anywhere; }
+.chart-sub { color: var(--ink-2); font-size: 12px; margin-top: 2px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-2); margin: 8px 0 4px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.key-line { width: 14px; height: 2px; border-radius: 1px; display: inline-block; }
+.key-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.key-hollow { width: 8px; height: 8px; border-radius: 50%; display: inline-block; border: 2px solid var(--ink-2); }
+button.toggle { font: inherit; font-size: 12px; color: var(--ink-2); background: none; border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; cursor: pointer; flex: none; }
+button.toggle:hover { color: var(--ink); }
+.plot { position: relative; outline: none; border-radius: 6px; }
+.plot:focus-visible { box-shadow: 0 0 0 2px var(--s1); }
+svg { display: block; overflow: visible; }
+svg text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); font-variant-numeric: tabular-nums; }
+svg text.end { fill: var(--ink-2); }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+th { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.key { overflow-wrap: anywhere; min-width: 160px; }
+td.spark { width: 180px; min-width: 140px; padding-right: 0; }
+.hint { color: var(--ink-2); font-size: 12px; }
+.empty { color: var(--ink-2); }
+code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+ol.timeline { list-style: none; margin: 0; padding: 0; }
+ol.timeline li { display: grid; grid-template-columns: 110px 70px 1fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--grid); }
+ol.timeline .when, ol.timeline .type { color: var(--ink-2); font-size: 13px; }
+.tooltip { position: fixed; z-index: 10; pointer-events: none; background: var(--surface-1); color: var(--ink); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14); padding: 8px 10px; font-size: 12px; min-width: 150px; max-width: 280px; }
+.tooltip .head { color: var(--ink-2); margin-bottom: 4px; }
+.tooltip .row { display: flex; align-items: center; gap: 8px; }
+.tooltip strong { font-variant-numeric: tabular-nums; }
+.tooltip .name { color: var(--ink-2); }
+.tooltip .extra { color: var(--ink-2); margin-top: 4px; }
+@media (max-width: 560px) {
+  .hero .figure { font-size: 48px; }
+  ol.timeline li { grid-template-columns: 1fr; gap: 0; }
+}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="title"></h1>
+    <div id="status" class="status" aria-live="polite"><span class="dot"></span><span id="status-text">Loading data…</span></div>
+  </header>
+  <section id="summary"></section>
+  <section id="field"></section>
+  <section id="lab"></section>
+  <section id="timeline"></section>
+</main>
+<div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+<script>
+(() => {
+  "use strict";
+  const TITLE = __TITLE_JSON__;
+  const DATA_FILE = "perf-dashboard.data.js";
+  const POLL_MS = 2000;
+  // Color follows the statistic, never its rank: p95 is the same hue in every chart.
+  const STAT_SLOT = { value: 1, p50: 1, mean: 2, p95: 3, p75: 4, p99: 5 };
+  const HEADLINE = ["mean", "p50", "p75", "p95", "p99", "value"];
+  const SVG = "http://www.w3.org/2000/svg";
+  const state = { stamp: null, entries: [], generated: null, lastOk: 0, lastTry: 0 };
+
+  document.getElementById("title").textContent = TITLE;
+
+  // ---------- data loading: a script tag works from file://, where fetch() doesn't ----------
+  window.perfDashboard = (payload) => {
+    state.lastOk = Date.now();
+    if (payload && payload.stamp !== state.stamp) {
+      state.stamp = payload.stamp;
+      state.entries = Array.isArray(payload.entries) ? payload.entries : [];
+      state.generated = payload.generated;
+      render();
+    }
+    setStatus();
+  };
+  function poll() {
+    state.lastTry = Date.now();
+    const s = document.createElement("script");
+    s.src = DATA_FILE + "?r=" + Date.now();
+    s.onload = () => s.remove();
+    s.onerror = () => { s.remove(); setStatus(); };
+    document.body.appendChild(s);
+  }
+  function setStatus() {
+    const box = document.getElementById("status");
+    const text = document.getElementById("status-text");
+    const live = Date.now() - state.lastOk < POLL_MS * 3;
+    box.classList.toggle("live", live);
+    if (live) text.textContent = "Live · data updated " + (state.generated ? fmtClock(Date.parse(state.generated)) : "now");
+    else if (state.lastOk) text.textContent = "Not updating · last data " + fmtClock(state.lastOk);
+    else text.textContent = "Waiting for " + DATA_FILE + " (run history.ts or dashboard.ts)";
+  }
+  setInterval(poll, POLL_MS);
+  setTimeout(setStatus, POLL_MS * 2);
+  let resizeTimer;
+  window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 150); });
+
+  // ---------- helpers ----------
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function svg(tag, attrs) {
+    const e = document.createElementNS(SVG, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function fmt(v) {
+    const a = Math.abs(v);
+    if (a >= 100) return Math.round(v).toLocaleString();
+    return v.toLocaleString(undefined, { maximumFractionDigits: a >= 10 ? 1 : 2 });
+  }
+  function withUnit(v, unit) {
+    if (!unit) return fmt(v);
+    return unit === "%" ? fmt(v) + "%" : fmt(v) + " " + unit;
+  }
+  function compact(v) {
+    const a = Math.abs(v);
+    const trim = (x) => (Math.round(x * 10) / 10).toString();
+    if (a >= 1e6) return trim(v / 1e6) + "M";
+    if (a >= 1e3) return trim(v / 1e3) + "K";
+    return fmt(v);
+  }
+  function fmtClock(t) { return new Date(t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
+  function fmtDay(t) { return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
+  function fmtStamp(t) {
+    return new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  }
+  let measureCtx;
+  function textWidth(s) {
+    measureCtx = measureCtx || document.createElement("canvas").getContext("2d");
+    measureCtx.font = "11px system-ui, -apple-system, Segoe UI, sans-serif";
+    return measureCtx.measureText(s).width;
+  }
+  function niceStep(span, count) {
+    const raw = span / Math.max(1, count);
+    const mag = Math.pow(10, Math.floor(Math.log10(raw || 1)));
+    for (const m of [1, 2, 2.5, 5, 10]) if (m * mag >= raw) return m * mag;
+    return 10 * mag;
+  }
+  function yScale(min, max, count) {
+    if (max <= min) max = min + 1;
+    const step = niceStep(max - min, count);
+    const lo = Math.floor(min / step) * step;
+    const hi = Math.ceil(max / step) * step;
+    const ticks = [];
+    for (let v = lo; v <= hi + step / 2; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
+    return { lo, hi, ticks };
+  }
+  function timeTicks(t0, t1, maxTicks) {
+    const H = 3600e3, D = 24 * H;
+    const steps = [H, 2 * H, 3 * H, 6 * H, 12 * H, D, 2 * D, 7 * D, 14 * D, 30 * D, 91 * D, 365 * D];
+    const step = steps.find((s) => (t1 - t0) / s <= maxTicks) || steps[steps.length - 1];
+    const start = new Date(t0);
+    if (step >= D) start.setHours(0, 0, 0, 0); else start.setMinutes(0, 0, 0);
+    const out = [];
+    for (let t = start.getTime(); t <= t1; t += step) if (t >= t0) out.push(t);
+    return { ticks: out, daily: step >= D };
+  }
+  const color = (slot) => "var(--s" + slot + ")";
+
+  // ---------- model ----------
+  function model(entries) {
+    const sorted = entries
+      .map((e) => Object.assign({ time: Date.parse(e.t) }, e))
+      .filter((e) => Number.isFinite(e.time))
+      .sort((a, b) => a.time - b.time);
+    const field = new Map(), lab = new Map(), events = [];
+    for (const e of sorted) {
+      if (e.kind === "event") { events.push(e); continue; }
+      if (typeof e.value !== "number" || !e.key) continue;
+      if (e.kind === "field") {
+        let f = field.get(e.key);
+        if (!f) field.set(e.key, (f = { key: e.key, unit: "", better: "lower", stats: new Map() }));
+        if (e.unit) f.unit = e.unit;
+        if (e.better) f.better = e.better;
+        const stat = e.stat || "value";
+        if (!f.stats.has(stat)) f.stats.set(stat, []);
+        f.stats.get(stat).push({ time: e.time, v: e.value, e });
+      } else if (e.kind === "lab" || e.kind === "ceiling") {
+        let l = lab.get(e.key);
+        if (!l) lab.set(e.key, (l = { key: e.key, ceilings: [], measured: [] }));
+        (e.kind === "ceiling" ? l.ceilings : l.measured).push({ time: e.time, v: e.value, e });
+      }
+    }
+    // Release markers: explicit release/revert events, else the first time each version reported.
+    let markers = events.filter((e) => e.type === "release" || e.type === "revert")
+      .map((e) => ({ time: e.time, label: (e.type === "revert" ? "↩ " : "") + (e.version || e.label) }));
+    if (!markers.length) {
+      const seen = new Set();
+      for (const f of field.values()) for (const pts of f.stats.values()) for (const p of pts) {
+        const v = p.e.version;
+        if (v && !seen.has(v)) { seen.add(v); markers.push({ time: p.time, label: v }); }
+      }
+      markers.sort((a, b) => a.time - b.time);
+    }
+    return { field, lab, events, markers };
+  }
+  function headline(f) {
+    for (const s of HEADLINE) if (f.stats.has(s)) return s;
+    return f.stats.keys().next().value;
+  }
+  const measured = (p) => !p.e.source || p.e.source === "measured";
+  // First → latest of the headline statistic. measuredOnly drops estimates, so they never move the headline.
+  function gain(f, measuredOnly) {
+    const pts = f.stats.get(headline(f)).filter((p) => !measuredOnly || measured(p));
+    if (pts.length < 2) return null;
+    const first = pts[0], last = pts[pts.length - 1];
+    if (!(first.v > 0 && last.v > 0)) return null;
+    return { first, last, ratio: f.better === "higher" ? last.v / first.v : first.v / last.v };
+  }
+
+  // ---------- tooltip ----------
+  const tip = document.getElementById("tooltip");
+  function showTip(x, y, head, rows, extra) {
+    tip.replaceChildren();
+    tip.appendChild(el("div", "head", head));
+    for (const r of rows) {
+      const row = el("div", "row");
+      const key = el("span", "key-line");
+      key.style.background = color(r.slot);
+      row.append(key, el("strong", "", r.value), el("span", "name", r.name));
+      tip.appendChild(row);
+    }
+    for (const line of extra) tip.appendChild(el("div", "extra", line));
+    tip.hidden = false;
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = Math.max(8, Math.min(x + 14, window.innerWidth - w - 8)) + "px";
+    tip.style.top = Math.max(8, y + 14 + h > window.innerHeight ? y - h - 14 : y + 14) + "px";
+  }
+  function hideTip() { tip.hidden = true; }
+
+  // ---------- line / step chart with crosshair, tooltip and keyboard ----------
+  // series: [{ name, slot, step, dotsOnly, unit, points: [{ time, v, e }] }]
+  function chart(host, o) {
+    const all = o.series.flatMap((s) => s.points);
+    if (!all.length) return;
+    const W = Math.max(120, Math.floor(host.clientWidth || o.width || 320));
+    const H = o.height;
+    let t0 = Math.min(...all.map((p) => p.time)), t1 = Math.max(...all.map((p) => p.time));
+    if (o.until) t1 = Math.max(t1, o.until);
+    if (t1 - t0 < 3600e3) { t0 -= 1800e3; t1 += 1800e3; }
+    const vals = all.map((p) => p.v);
+    const ys = yScale(Math.min(0, ...vals), Math.max(...vals), o.compact ? 2 : 4);
+    const unit = o.series[0].unit;
+
+    // Direct end labels: the latest value for one series, the series names for several, none if they collide.
+    let ends = [];
+    if (!o.compact) {
+      ends = o.series.filter((s) => !s.dotsOnly && s.points.length).map((s) => ({
+        s, last: s.points[s.points.length - 1],
+        text: o.series.length === 1 ? withUnit(s.points[s.points.length - 1].v, unit) : s.name,
+      }));
+    }
+    const yLabelW = o.compact ? 0 : Math.max(...ys.ticks.map((v) => textWidth(compact(v)))) + 10;
+    const endW = ends.length ? Math.max(...ends.map((d) => textWidth(d.text))) + 10 : 0;
+    const m = { l: o.compact ? 4 : yLabelW, r: o.compact ? 6 : Math.max(10, endW), t: o.compact ? 6 : (o.markers && o.markers.length ? 20 : 8), b: o.compact ? 6 : 22 };
+    const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
+    const y = (v) => m.t + (1 - (v - ys.lo) / (ys.hi - ys.lo)) * (H - m.t - m.b);
+    const root = svg("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, "aria-hidden": "true" });
+
+    if (!o.compact) {
+      for (const v of ys.ticks) {
+        root.appendChild(svg("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), style: "stroke:" + (v === 0 ? "var(--axis)" : "var(--grid)") + ";stroke-width:1" }));
+        const t = svg("text", { x: m.l - 8, y: y(v) + 4, "text-anchor": "end" });
+        t.textContent = compact(v);
+        root.appendChild(t);
+      }
+      const tt = timeTicks(t0, t1, Math.max(2, Math.floor((W - m.l - m.r) / (t1 - t0 >= 4 * 86400e3 ? 80 : 120))));
+      for (const t of tt.ticks) {
+        const label = svg("text", { x: x(t), y: H - 6, "text-anchor": "middle" });
+        label.textContent = tt.daily ? fmtDay(t) : fmtDay(t) + " " + new Date(t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+        root.appendChild(label);
+      }
+      let lastRight = -Infinity;
+      for (const mk of o.markers || []) {
+        if (mk.time < t0 || mk.time > t1) continue;
+        const mx = x(mk.time);
+        root.appendChild(svg("line", { x1: mx, x2: mx, y1: m.t - 4, y2: H - m.b, style: "stroke:var(--axis);stroke-width:1" }));
+        const w = textWidth(mk.label);
+        if (mx - w / 2 > lastRight + 6 && mx + w / 2 < W) {
+          const t = svg("text", { x: mx, y: m.t - 8, "text-anchor": "middle" });
+          t.textContent = mk.label;
+          root.appendChild(t);
+          lastRight = mx + w / 2;
+        }
+      }
+    } else {
+      root.appendChild(svg("line", { x1: m.l, x2: W - m.r, y1: y(ys.lo), y2: y(ys.lo), style: "stroke:var(--grid);stroke-width:1" }));
+    }
+
+    for (const s of o.series) {
+      if (!s.dotsOnly && s.points.length) {
+        let d = "M" + x(s.points[0].time) + " " + y(s.points[0].v);
+        for (let i = 1; i < s.points.length; i++) {
+          const p = s.points[i];
+          d += s.step ? " H" + x(p.time) + " V" + y(p.v) : " L" + x(p.time) + " " + y(p.v);
+        }
+        if (s.step) d += " H" + x(t1);
+        root.appendChild(svg("path", { d, style: "fill:none;stroke:" + color(s.slot) + ";stroke-width:2;stroke-linejoin:round;stroke-linecap:round" }));
+      }
+      const dots = o.compact && !s.dotsOnly ? s.points.slice(-1) : s.points;
+      for (const p of dots) {
+        const hollow = p.e && p.e.source && p.e.source !== "measured";
+        root.appendChild(svg("circle", {
+          cx: x(p.time), cy: y(p.v), r: 4,
+          style: hollow
+            ? "fill:var(--surface-1);stroke:" + color(s.slot) + ";stroke-width:2"
+            : "fill:" + color(s.slot) + ";stroke:var(--surface-1);stroke-width:2",
+        }));
+      }
+    }
+
+    if (ends.length) {
+      const placed = ends.map((d) => ({ d, yy: y(d.last.v) })).sort((a, b) => a.yy - b.yy);
+      const collide = placed.some((p, i) => i > 0 && p.yy - placed[i - 1].yy < 13);
+      if (!collide) for (const p of placed) {
+        const t = svg("text", { x: x(p.d.last.time) + 8, y: p.yy + 4, class: "end" });
+        t.textContent = p.d.text;
+        root.appendChild(t);
+      }
+    }
+
+    // Hover layer: the crosshair snaps to the nearest recorded time; one tooltip lists every series.
+    const times = [...new Set(all.map((p) => p.time))].sort((a, b) => a - b);
+    const cross = svg("line", { y1: m.t, y2: H - m.b, style: "stroke:var(--ink-2);stroke-width:1;display:none" });
+    root.appendChild(cross);
+    const hit = svg("rect", { x: 0, y: 0, width: W, height: H, style: "fill:transparent" });
+    root.appendChild(hit);
+    const valueAt = (s, t) => {
+      if (!s.step) return s.points.find((p) => p.time === t);
+      let found;
+      for (const p of s.points) if (p.time <= t) found = p;
+      return found;
+    };
+    let index = -1;
+    const show = (i, cx, cy) => {
+      index = i;
+      const t = times[i];
+      cross.setAttribute("x1", x(t));
+      cross.setAttribute("x2", x(t));
+      cross.style.display = "";
+      const rows = [], extra = [], perSeries = [];
+      let version = "";
+      for (const s of o.series) {
+        const p = valueAt(s, t);
+        if (!p) continue;
+        rows.push({ slot: s.slot, value: withUnit(p.v, s.unit), name: s.name });
+        if (p.time === t && p.e) {
+          if (p.e.version && !version) version = p.e.version;
+          if (o.series.length === 1 || !s.step) {
+            const bits = [];
+            if (p.e.n) bits.push("n = " + p.e.n.toLocaleString());
+            if (p.e.source && p.e.source !== "measured") bits.push(p.e.source);
+            perSeries.push({ name: s.name, bits: bits.join(", "), note: p.e.note || "" });
+          }
+        }
+      }
+      // One line when every series shares the same n, source and note.
+      const same = perSeries.every((q) => q.bits === perSeries[0].bits && q.note === perSeries[0].note);
+      for (const q of same ? perSeries.slice(0, 1) : perSeries) {
+        if (q.bits) extra.push(same ? q.bits : q.name + ": " + q.bits);
+        if (q.note) extra.push(q.note);
+      }
+      showTip(cx, cy, fmtStamp(t) + (version ? " · " + version : ""), rows, extra);
+    };
+    const nearest = (px) => {
+      let best = 0;
+      for (let i = 1; i < times.length; i++) if (Math.abs(x(times[i]) - px) < Math.abs(x(times[best]) - px)) best = i;
+      return best;
+    };
+    const plot = host;
+    plot.addEventListener("pointermove", (ev) => {
+      const r = root.getBoundingClientRect();
+      show(nearest(ev.clientX - r.left), ev.clientX, ev.clientY);
+    });
+    plot.addEventListener("pointerleave", () => { cross.style.display = "none"; hideTip(); });
+    plot.tabIndex = 0;
+    plot.setAttribute("role", "img");
+    plot.setAttribute("aria-label", o.label + ". Use the left and right arrow keys to read values; the table view lists them all.");
+    const keyShow = () => {
+      const r = root.getBoundingClientRect();
+      show(index, r.left + x(times[index]), r.top + m.t);
+    };
+    plot.addEventListener("keydown", (ev) => {
+      if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+      ev.preventDefault();
+      index = index < 0 ? times.length - 1 : Math.max(0, Math.min(times.length - 1, index + (ev.key === "ArrowRight" ? 1 : -1)));
+      keyShow();
+    });
+    plot.addEventListener("focus", () => { if (index < 0) index = times.length - 1; keyShow(); });
+    plot.addEventListener("blur", () => { cross.style.display = "none"; hideTip(); });
+    host.replaceChildren(root);
+  }
+
+  // ---------- sections ----------
+  function render() {
+    hideTip();
+    const { field, lab, events, markers } = model(state.entries);
+    renderSummary(field, lab);
+    renderField(field, markers);
+    renderLab(lab);
+    renderTimeline(events);
+  }
+
+  function renderSummary(field, lab) {
+    const box = document.getElementById("summary");
+    box.replaceChildren();
+    if (!field.size && !lab.size) {
+      const card = el("div", "card empty");
+      card.append("No history yet. Record field results with ", el("code", "", "history.ts field"),
+        ", lab counts and budgets with ", el("code", "", "history.ts lab"), ", or past budgets with ",
+        el("code", "", "history.ts backfill"), ". This page updates on its own.");
+      box.appendChild(card);
+      return;
+    }
+    const hero = el("div", "card hero");
+    const gains = [...field.values()].map((f) => gain(f, true)).filter(Boolean);
+    if (gains.length) {
+      const g = Math.exp(gains.reduce((a, x) => a + Math.log(x.ratio), 0) / gains.length);
+      const better = g >= 1;
+      const r = better ? g : 1 / g;
+      hero.append(el("div", "figure", (r >= 10 ? Math.round(r) : r.toFixed(1)) + "×"),
+        el("div", "sub", (better ? "better" : "worse") + ": the geometric mean of first → latest across " +
+          gains.length + " field metric" + (gains.length > 1 ? "s" : "") + " (each metric's headline statistic; estimates excluded)."));
+    } else {
+      const keys = [...lab.values()].filter((l) => l.ceilings.length);
+      const lowered = keys.filter((l) => l.ceilings[l.ceilings.length - 1].v < l.ceilings[0].v).length;
+      hero.append(el("div", "figure", String(lowered)),
+        el("div", "sub", "of " + keys.length + " lab budgets lowered since they were first recorded. Field results appear here once recorded."));
+    }
+    box.appendChild(hero);
+    if (!field.size) return;
+    const tiles = el("div", "tiles");
+    for (const f of [...field.values()].sort((a, b) => a.key.localeCompare(b.key))) {
+      const stat = headline(f);
+      const pts = f.stats.get(stat);
+      const last = pts[pts.length - 1];
+      const tile = el("div", "card tile");
+      tile.append(el("div", "label", f.key + (stat !== "value" ? " · " + stat : "") + (measured(last) ? "" : " · " + last.e.source)),
+        el("div", "value", withUnit(last.v, f.unit)));
+      const g = gain(f);
+      if (g) {
+        const pct = ((g.last.v - g.first.v) / g.first.v) * 100;
+        const good = g.ratio > 1;
+        const delta = el("div", "delta");
+        delta.append(el("span", "arrow " + (good ? "good" : "bad"), pct < 0 ? "▼ " : "▲ "),
+          Math.abs(pct).toFixed(Math.abs(pct) < 10 ? 1 : 0) + "% since " + (g.first.e.version || fmtDay(g.first.time)) +
+          (good ? " (better)" : " (worse)"));
+        tile.appendChild(delta);
+      } else tile.appendChild(el("div", "delta", "one result so far"));
+      tiles.appendChild(tile);
+    }
+    box.appendChild(tiles);
+  }
+
+  function tableToggle(card, plot, buildTable) {
+    const btn = el("button", "toggle", "Table");
+    btn.type = "button";
+    btn.setAttribute("aria-pressed", "false");
+    let table;
+    btn.addEventListener("click", () => {
+      const showTable = btn.getAttribute("aria-pressed") === "false";
+      btn.setAttribute("aria-pressed", String(showTable));
+      btn.textContent = showTable ? "Chart" : "Table";
+      if (!table) { table = buildTable(); card.appendChild(table); }
+      table.hidden = !showTable;
+      plot.hidden = showTable;
+    });
+    return btn;
+  }
+
+  function renderField(field, markers) {
+    const box = document.getElementById("field");
+    box.replaceChildren();
+    if (!field.size) return;
+    box.appendChild(el("h2", "", "Field results"));
+    const grid = el("div", "grid");
+    box.appendChild(grid);
+    for (const f of [...field.values()].sort((a, b) => a.key.localeCompare(b.key))) {
+      const card = el("div", "card");
+      const stats = [...f.stats.keys()].sort((a, b) => (STAT_SLOT[a] || 9) - (STAT_SLOT[b] || 9));
+      const series = stats.map((s) => ({ name: s === "value" ? f.key : s, slot: STAT_SLOT[s] || 6, unit: f.unit, points: f.stats.get(s) }));
+      const head = el("div", "chart-head");
+      const titles = el("div");
+      titles.append(el("div", "chart-title", f.key),
+        el("div", "chart-sub", (f.better === "higher" ? "higher" : "lower") + " is better" + (f.unit ? " · " + f.unit : "")));
+      const plot = el("div", "plot");
+      head.append(titles, tableToggle(card, plot, () => fieldTable(f, stats)));
+      card.appendChild(head);
+      const hasHollow = series.some((s) => s.points.some((p) => p.e.source && p.e.source !== "measured"));
+      if (series.length > 1 || hasHollow) {
+        const legend = el("div", "legend");
+        if (series.length > 1) for (const s of series) {
+          const k = el("span"); const line = el("span", "key-line"); line.style.background = color(s.slot);
+          k.append(line, s.name); legend.appendChild(k);
+        }
+        if (hasHollow) { const k = el("span"); k.append(el("span", "key-hollow"), "estimate or simulated"); legend.appendChild(k); }
+        card.appendChild(legend);
+      }
+      card.appendChild(plot);
+      grid.appendChild(card);
+      chart(plot, { series, markers, height: 200, label: f.key });
+    }
+  }
+
+  function fieldTable(f, stats) {
+    const wrap = el("div", "table-wrap");
+    wrap.hidden = true;
+    const table = el("table");
+    const head = el("tr");
+    for (const h of ["When", "Version", "Statistic", "Value", "n", "Source", "Note"]) head.appendChild(el("th", h === "Value" || h === "n" ? "num" : "", h));
+    table.appendChild(head);
+    const rows = [];
+    for (const s of stats) for (const p of f.stats.get(s)) rows.push({ s, p });
+    rows.sort((a, b) => a.p.time - b.p.time);
+    for (const { s, p } of rows) {
+      const tr = el("tr");
+      tr.append(el("td", "", fmtStamp(p.time)), el("td", "", p.e.version || ""), el("td", "", s),
+        el("td", "num", withUnit(p.v, f.unit)), el("td", "num", p.e.n ? p.e.n.toLocaleString() : ""),
+        el("td", "", p.e.source || "measured"), el("td", "", p.e.note || ""));
+      table.appendChild(tr);
+    }
+    wrap.appendChild(table);
+    return wrap;
+  }
+
+  function renderLab(lab) {
+    const box = document.getElementById("lab");
+    box.replaceChildren();
+    if (!lab.size) return;
+    box.appendChild(el("h2", "", "Lab budgets"));
+    const card = el("div", "card");
+    const legend = el("div", "legend");
+    const c = el("span"); const cl = el("span", "key-line"); cl.style.background = color(1); c.append(cl, "ceiling");
+    const m = el("span"); const md = el("span", "key-dot"); md.style.background = color(2); m.append(md, "lab count when it changed");
+    legend.append(c, m);
+    card.append(legend, el("div", "hint", "Ceilings only go down. Largest reductions first."));
+    const wrap = el("div", "table-wrap");
+    const table = el("table");
+    const head = el("tr");
+    for (const [h, cls] of [["Budget", ""], ["Before", "num"], ["Now", "num"], ["Change", "num"], ["Latest count", "num"], ["History", ""]])
+      head.appendChild(el("th", cls, h));
+    table.appendChild(head);
+    const now = Date.now();
+    const rows = [...lab.values()].map((l) => {
+      // Before: the earliest value recorded for the key, a lab count from before the fix when there is one.
+      const earliest = l.measured.concat(l.ceilings).sort((a, b) => a.time - b.time || (a.e.kind === "lab" ? -1 : 1))[0];
+      const first = earliest ? earliest.v : undefined;
+      const cur = l.ceilings.length ? l.ceilings[l.ceilings.length - 1].v : undefined;
+      const counts = l.measured.filter((p) => p.e.stat !== "before");
+      const latest = counts.length ? counts[counts.length - 1].v : undefined;
+      const drop = first > 0 && cur !== undefined ? (first - cur) / first : 0;
+      return { l, first, cur, latest, drop };
+    }).sort((a, b) => b.drop - a.drop || a.l.key.localeCompare(b.l.key));
+    const sparks = [];
+    for (const r of rows) {
+      const tr = el("tr");
+      const change = r.first === undefined || r.cur === r.first ? "—"
+        : r.cur < r.first ? "−" + (r.drop >= 0.995 && r.cur > 0 ? (r.drop * 100).toFixed(2) : Math.round(r.drop * 100)) + "%" : "▲ " + Math.round(((r.cur - r.first) / Math.max(1, r.first)) * 100) + "%";
+      const latestCell = el("td", "num", r.latest === undefined ? "" : fmt(r.latest));
+      if (r.latest !== undefined && r.cur !== undefined && r.latest < r.cur) latestCell.appendChild(el("div", "hint", "can lower"));
+      const spark = el("td", "spark");
+      const plot = el("div", "plot");
+      spark.appendChild(plot);
+      tr.append(el("td", "key", r.l.key), el("td", "num", r.first === undefined ? "" : fmt(r.first)),
+        el("td", "num", r.cur === undefined ? "" : fmt(r.cur)), el("td", "num", change), latestCell, spark);
+      table.appendChild(tr);
+      sparks.push({ plot, l: r.l });
+    }
+    wrap.appendChild(table);
+    card.appendChild(wrap);
+    box.appendChild(card);
+    for (const { plot, l } of sparks) {
+      const series = [];
+      if (l.ceilings.length) series.push({ name: "ceiling", slot: 1, step: true, points: l.ceilings });
+      if (l.measured.length) series.push({ name: "lab count", slot: 2, dotsOnly: true, points: l.measured });
+      chart(plot, { series, height: 40, compact: true, until: now, label: l.key + " ceiling history" });
+    }
+  }
+
+  function renderTimeline(events) {
+    const box = document.getElementById("timeline");
+    box.replaceChildren();
+    if (!events.length) return;
+    box.appendChild(el("h2", "", "Timeline"));
+    const card = el("div", "card");
+    const list = el("ol", "timeline");
+    const names = { release: "Release", revert: "Reverted", note: "Note" };
+    for (const e of events.slice().reverse()) {
+      const li = el("li");
+      li.append(el("span", "when", fmtStamp(e.time)), el("span", "type", names[e.type] || "Note"),
+        el("span", "", e.label + (e.version && e.label !== e.version ? " (" + e.version + ")" : "")));
+      list.appendChild(li);
+    }
+    card.appendChild(list);
+    box.appendChild(card);
+  }
+})();
+</script>
+<script src="perf-dashboard.data.js"></script>
+</body>
+</html>

@@ -21,6 +21,7 @@ skills/perf-hill-climb/
 │   ├── metrics.md            choosing and validating lab metrics; making the uncountable countable
 │   ├── telemetry.md          per-phase field profiles, report-previous-run, A/B arms, report scripts
 │   ├── ratchet.md            budget files, CI guard, daily lowering
+│   ├── history.md            the history file, its commands, the live dashboard
 │   ├── harness.md            fake clocks, counting fakes, in-test budget checks
 │   ├── firmware.md           microcontrollers, battery, wake/sleep, radios, displays
 │   ├── web.md                load, navigation, interaction latency, layout shift, frame budget
@@ -32,9 +33,10 @@ skills/perf-hill-climb/
 │   ├── budget-template.txt   example budget file
 │   └── harness/              in-test budget checks, fake clock, counting fakes (TypeScript and C++)
 └── scripts/
-    ├── ratchet.ts            budget check / lower / guard (bun or Node 22.6+, no dependencies)
-    ├── ratchet.test.ts       bun test
-    └── harness.test.ts       bun test (also compiles the C++ headers)
+    ├── ratchet.ts            budget check / lower / guard
+    ├── history.ts            append field results, lab counts, ceilings and releases to perf-history.jsonl
+    ├── dashboard.ts          write a live perf-dashboard.html next to the history (with dashboard.template.html)
+    └── *.test.ts             bun test (harness.test.ts also compiles the C++ headers)
 ```
 
 Claude loads `SKILL.md` when a request matches. It first looks for an earlier session's perf doc and budgets, sizes the process to the task, and reads a reference file only when its platform or topic is in play.
@@ -65,12 +67,15 @@ ln -s "$PWD/skills/perf-hill-climb" ~/.claude/skills/perf-hill-climb
 
 Ask in plain words, for example "startup feels slow, can we make it faster?", "set up perf budgets for the API", or "why is battery life a month instead of a year?". You can also invoke it with `/perf-hill-climb`.
 
-The ratchet script works on its own:
+The scripts run on bun or Node 22.6+ with no dependencies, and work on their own:
 
 ```bash
 bun skills/perf-hill-climb/scripts/ratchet.ts check perf-budget.txt measured.json
 bun skills/perf-hill-climb/scripts/ratchet.ts lower perf-budget.txt measured.json
 bun skills/perf-hill-climb/scripts/ratchet.ts guard perf-budget.txt origin/main
+bun skills/perf-hill-climb/scripts/history.ts lab perf-history.jsonl perf-budget.txt test.log
+bun skills/perf-hill-climb/scripts/dashboard.ts perf-history.jsonl --title "my-app"
+open perf-dashboard.html   # redraws within 2 s of every history.ts write; no server needed
 ```
 
 Tests: `cd skills/perf-hill-climb/scripts && bun test`.

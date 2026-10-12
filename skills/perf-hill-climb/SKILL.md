@@ -7,8 +7,9 @@ description: >-
   ratchet down. Use when asked to speed something up or cut latency, startup
   time, jank, frame drops, battery drain, wake time, radio-on time, CPU or
   queries; to set up benchmarks, perf budgets, telemetry or regression guards; to
-  find out why something is slow; to continue an earlier performance effort; or
-  to run a perf sprint or "hill climb". Firmware, web, server, desktop and CLI.
+  find out why something is slow; to continue an earlier performance effort; to
+  track or chart performance gains over time; or to run a perf sprint or "hill
+  climb". Firmware, web, server, desktop and CLI.
 ---
 
 # Performance hill climb
@@ -26,8 +27,16 @@ git ls-files | grep -iE 'perf|budget|efficien|benchmark|wake.?report|telemetry';
 - **Perf doc:** read Status, Open leads and Didn't help first. Continue from the next step it names. Don't retry anything under Didn't help without a new reason.
 - **Budget file:** its ceilings are the baseline. Run the checks before changing code.
 - **Field report script:** run it over the window since the last release before deciding anything. A running A/B may already have its answer.
+- **`perf-history.jsonl`:** the trend so far, one measurement per line. Regenerate the dashboard from it (below) and give the user the path.
 
-No perf doc and the task is a climb: start one from `assets/perf-log-template.md`.
+No perf doc and the task is a climb: start one from `assets/perf-log-template.md`, and start the history and dashboard (`references/history.md`):
+
+```bash
+bun scripts/history.ts backfill perf/perf-history.jsonl perf/perf-budget.txt   # past ceilings from git, if a budget exists
+bun scripts/dashboard.ts perf/perf-history.jsonl --title "<project>"           # then: open perf/perf-dashboard.html
+```
+
+The page re-reads its data every 2 s, and every `history.ts` write refreshes that data, so it stays current with no server running.
 
 ## 2. Size the process to the task
 
@@ -43,6 +52,10 @@ No perf doc and the task is a climb: start one from `assets/perf-log-template.md
 4. **Reproduce in the smallest harness,** ideally matching the field numbers exactly. If one experiment takes minutes, fix the loop first.
 5. **Fix, then prove the guard can fail:** put the old behaviour back and watch the budget go red.
 6. **Ship so the effect can be attributed:** one change per release when the evidence is field data, and arms within one period when conditions drift. Then read the field. If it held, ratchet the budget down. If not, revert and add it to Didn't help with its numbers.
+   - **Record each step in the history,** so the dashboard shows the climb as it happens:
+     - `history.ts event … --type release` (or `revert`) for each release
+     - `history.ts field` for each field result, with `--version`, `--stat`, `--n`, and `--source estimate` when it isn't measured
+     - `history.ts lab` after the lab checks
 7. **Move to the next slow spot in the same journey.** The target isn't the stopping point. Stop on purpose, when the remaining cost is something code can't move.
 
 ## 4. Your defaults that hurt here
@@ -74,6 +87,7 @@ No perf doc and the task is a climb: start one from `assets/perf-log-template.md
   - Open leads.
 
   The next session starts from it.
+- **Make sure the history holds every result** the doc quotes, and commit it.
 - **Save lessons you didn't already know.** If a lesson would save time on another project on the same platform, add one bullet with its evidence to the matching `references/<platform>.md` here, if this skill directory is a writable checkout, and tell the user. Leave out anything that would surprise nobody.
 
 ## References
@@ -87,17 +101,20 @@ Read only what the task needs.
 - `references/metrics.md`: choosing and validating a lab count, making the uncountable countable.
 - `references/telemetry.md`: field profiles, A/B arms, report scripts.
 - `references/ratchet.md`: budget files, the CI guard, lowering ceilings.
+- `references/history.md`: the history file, its commands, and the live dashboard.
 - `references/harness.md`: fake clocks, counting fakes and in-test budget checks. Copyable TypeScript and C++ is in `assets/harness/`.
 - `references/case-studies.md`: the claude.ai sprint, for calibrating scope and reporting.
 
-## Ratchet script
+## Scripts
 
-`scripts/ratchet.ts` runs on bun or Node 22.6+ with no dependencies. Copy it into the project.
+The scripts in `scripts/` run on bun or Node 22.6+ with no dependencies. Copy them into the project, for example into `perf/`, leaving out the tests. Each one prints its usage when run without arguments.
 
 ```bash
 bun ratchet.ts check perf-budget.txt measured.json   # exit 1 if any key is OVER or MISSING
 bun ratchet.ts lower perf-budget.txt measured.json   # rewrite ceilings down to measured; never raises
 bun ratchet.ts guard perf-budget.txt origin/main     # exit 1 if a ceiling rose or a key vanished
+bun history.ts field|lab|event|backfill perf-history.jsonl …   # append to the history (references/history.md)
+bun dashboard.ts perf-history.jsonl --title "<project>"        # write perf-dashboard.html next to it
 ```
 
 Measured input can be JSON, `key value` lines, or a test log with `BUDGET key value / ceiling` lines.

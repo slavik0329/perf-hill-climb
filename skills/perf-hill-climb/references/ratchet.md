@@ -30,6 +30,7 @@ There is a template in `assets/budget-template.txt`. The in-test checks are in `
 
 - `ratchet.ts guard <budget> origin/main` fails if a ceiling rose or a key disappeared (deleting a guard is raising it to infinity). New keys pass. A missing base skips with a message. Raising a ceiling then takes a deliberate human override.
 - A daily job runs the benchmarks on main, runs `lower` on the file, and commits if it changed. claude.ai did this, so incidental improvements became the new floor too.
+- After each check, `history.ts lab` records any ceiling or count that changed, so the dashboard shows each step down (`history.md`).
 
 ## Lint budgets
 
