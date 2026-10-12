@@ -1,0 +1,20 @@
+# Performance budgets: deterministic counts and simulated milliseconds per
+# scenario. Ceilings may only go down. Lower one in the same change when a test
+# prints "(lower the ceiling)". `ratchet.ts guard` fails if a ceiling rises or a
+# key disappears relative to the base branch.
+#
+# Format: <area>.<scenario>.<metric>  <integer ceiling>  # <value before the fix>: <why>
+# The keys below are examples from several platforms; replace them with your own.
+#
+# key                                  ceiling   # what it was before this budget existed
+startup.cold.modules_loaded                 212   # 340: every subcommand imported eagerly
+startup.cold.sync_fs_reads                    3   # 41: config, credentials and plugins read one file at a time
+composer.keystroke.react_commits              1   # 14: store subscription re-rendered the whole tree
+composer.keystroke.style_recalcs              1
+transcript.load.layout_shifts.sidebar         0   # 3: header row, caret, scrollbar
+api.conversation_get.queries                  2   # 1 + N: messages loaded one at a time
+api.conversation_get.upstream_calls           1
+wake.normal.blocked_ms                      120   # 1000: stream read waited out its timeout at end of file
+wake.normal.flash_writes                      0   # 1: settings rewritten every wake
+wake.fallback.radio_begins                    2
+lint.readString_on_file                       0   # waits its 1 s timeout at EOF

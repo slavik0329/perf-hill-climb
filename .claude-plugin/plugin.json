@@ -1,0 +1,10 @@
+{
+  "name": "perf-hill-climb",
+  "description": "Make software measurably faster or leaner by hill-climbing on numbers: per-phase telemetry, deterministic lab counts validated against the clock, one change at a time, and budgets that only ratchet down. Rules for firmware, web, server and desktop/CLI, plus a budget ratchet script.",
+  "version": "0.2.0",
+  "author": {
+    "name": "Steve Dakh"
+  },
+  "license": "MIT",
+  "keywords": ["performance", "latency", "battery", "benchmark", "budget", "ratchet", "telemetry", "hill-climb"]
+}
