@@ -63,3 +63,10 @@ A static shell breaks quietly when the real component changes. To catch that:
 ## Lab gaps
 
 Chrome's speculative prerender lays out the page at the current tab's height. Managed browsers show a 56 px footer on the new-tab page, so the page grew 56 px about 100 ms after first paint, and the composer dropped ~10 px. Headless Chrome has no browser UI, so no lab test could see this. An internal user reported it four hours after release. The fix pinned the layout across the resize, and a test now simulates the prerender.
+
+## TV and embedded web engines
+
+Measured on a Samsung Tizen 8 TV (Chromium 108), 2026-10-14, while fixing a 2.3 s freeze on a screen's first open:
+- **Split each screen's first frame into its open, its draw and its render** (a message posted from the frame callback arrives after style, layout and paint). A throttled desktop trace found the JavaScript costs but missed the TV's paint costs: an overlay shown from `display: none` cost ~95 ms of render per open on the TV and 2 ms on desktop at 6×. Keeping it laid out on its own layer (`opacity: 0`, `will-change: opacity`) cut that to ~33 ms; it slowed another screen's first open by ~150 ms, so measure each one.
+- **The first `toLocaleString` / `toLocaleDateString` of a run costs 150–230 ms** (the locale data loads; 0.4 ms after). Format numbers and dates by hand on the UI thread.
+- **Strings in `postMessage` are copied on the receiving thread** (~30 ns a character: 470 ms for 14M). Typed arrays transfer for free, so send big string tables as UTF-8 bytes with offsets and decode only the rows drawn.
