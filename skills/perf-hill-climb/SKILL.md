@@ -34,9 +34,10 @@ No perf doc and the task is a climb: start one from `assets/perf-log-template.md
 ```bash
 bun scripts/history.ts backfill perf/perf-history.jsonl perf/perf-budget.txt   # past ceilings from git, if a budget exists
 bun scripts/dashboard.ts perf/perf-history.jsonl --title "<project>"           # then: open perf/perf-dashboard.html
+bun scripts/history.ts hook perf/perf-history.jsonl                            # results that arrive by git refresh it too
 ```
 
-The page re-reads its data every 2 s, and every `history.ts` write refreshes that data, so it stays current with no server running.
+The page re-reads its data every 2 s, and every `history.ts` write refreshes that data, so it stays current with no server running. Results written in another worktree or clone arrive by git instead, which only the hook catches.
 
 ## 2. Size the process to the task
 
@@ -56,6 +57,8 @@ The page re-reads its data every 2 s, and every `history.ts` write refreshes tha
      - `history.ts event … --type release` (or `revert`) for each release
      - `history.ts field` for each field result, with `--version`, `--stat`, `--n`, and `--source estimate` when it isn't measured
      - `history.ts lab` after the lab checks
+   - **One key per journey.** Record the next result of the same journey under the same key, and say what changed in `--version` and `--note`. A new key per arm or survey leaves a chart with one point each, and the climb never shows as a line. Join keys that already split in `perf-journeys.json` (`references/history.md`).
+   - **Let the report script record field results** with `field --once`, run where the records arrive. Results you mean to enter by hand get skipped.
 7. **Move to the next slow spot in the same journey.** The target isn't the stopping point. Stop on purpose, when the remaining cost is something code can't move.
 
 ## 4. Your defaults that hurt here
@@ -114,6 +117,7 @@ bun ratchet.ts check perf-budget.txt measured.json   # exit 1 if any key is OVER
 bun ratchet.ts lower perf-budget.txt measured.json   # rewrite ceilings down to measured; never raises
 bun ratchet.ts guard perf-budget.txt origin/main     # exit 1 if a ceiling rose or a key vanished
 bun history.ts field|lab|event|backfill perf-history.jsonl …   # append to the history (references/history.md)
+bun history.ts sync|hook perf-history.jsonl                    # refresh the dashboard's data now, or from git hooks
 bun dashboard.ts perf-history.jsonl --title "<project>"        # write perf-dashboard.html next to it
 ```
 

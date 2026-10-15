@@ -7,7 +7,7 @@
     {
       "name": "perf-hill-climb",
       "description": "Make software measurably faster or leaner by hill-climbing on numbers, with rules for firmware, web, server and desktop/CLI, plus a budget ratchet script.",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "source": "./",
       "category": "development"
     }
