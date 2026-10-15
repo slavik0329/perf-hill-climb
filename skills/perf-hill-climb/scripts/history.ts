@@ -4,17 +4,22 @@
 //
 //   field    <history> <measured|-> --version V [--stat p50|mean|p95|...] [--n N] [--unit ms]
 //                                   [--source measured|estimate|simulated|datasheet] [--better higher]
-//                                   [--note TEXT] [--t ISO]
+//                                   [--note TEXT] [--t ISO] [--once]
 //   lab      <history> <budget> <measured|->   record ceilings and lab counts that changed since last time
 //   event    <history> <label> [--type release|revert|note] [--version V] [--t ISO]
 //   backfill <history> <budget>                record every past ceiling from the budget file's git history
+//   sync     <history>                         rewrite the dashboard's data file now
+//   hook     <history>                         add `sync` to the repo's git hooks
 //
 // Every write also rewrites perf-dashboard.data.js when perf-dashboard.html sits next to the
-// history file, so an open dashboard redraws within seconds. Runs on bun or Node 22.6+.
+// history file, so an open dashboard redraws within seconds. Results that arrive through git (a
+// pull, a merge, another worktree's commits) don't pass through here: `hook` covers those.
+// perf-journeys.json next to the history, when present, joins keys that measured one journey
+// (references/history.md). Runs on bun or Node 22.6+.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseBudget, parseMeasured, type Values } from "./ratchet.ts";
 
@@ -60,16 +65,55 @@ export function readHistory(path: string): Entry[] {
   return existsSync(path) ? parseHistory(readFileSync(path, "utf8")) : [];
 }
 
+/**
+ * A journey whose results were recorded under several keys (a key per arm, survey or condition).
+ * The dashboard draws its members as one line. Members are listed by precedence: when two have a
+ * result for the same version and statistic, the line keeps the earlier one's. A journey's own key
+ * counts as its last member.
+ */
+export type Journey = { key: string; title?: string; members: string[] };
+
+export function journeysPath(historyPath: string): string {
+  return join(dirname(resolve(historyPath)), "perf-journeys.json");
+}
+
+export function parseJourneys(text: string): Journey[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new Error("perf-journeys.json: not JSON");
+  }
+  if (!Array.isArray(raw)) throw new Error("perf-journeys.json: needs an array of journeys");
+  const owner = new Map<string, string>();
+  return raw.map((j, i) => {
+    const members = j?.members;
+    if (typeof j?.key !== "string" || !Array.isArray(members) || !members.length || !members.every((m: unknown) => typeof m === "string"))
+      throw new Error(`perf-journeys.json: journey ${i + 1} needs "key" and a non-empty "members" list of keys`);
+    for (const m of new Set([...members, j.key])) {
+      if (owner.has(m)) throw new Error(`perf-journeys.json: ${m} is in both ${owner.get(m)} and ${j.key}`);
+      owner.set(m, j.key);
+    }
+    return { key: j.key, ...(typeof j.title === "string" && { title: j.title }), members };
+  });
+}
+
+export function readJourneys(historyPath: string): Journey[] {
+  const p = journeysPath(historyPath);
+  return existsSync(p) ? parseJourneys(readFileSync(p, "utf8")) : [];
+}
+
 export function dashboardPaths(historyPath: string) {
   const dir = dirname(resolve(historyPath));
   return { html: join(dir, "perf-dashboard.html"), data: join(dir, "perf-dashboard.data.js") };
 }
 
 /** The data file the dashboard polls: plain JS, so it loads from file:// where fetch() can't. */
-export function dataScript(historyText: string): string {
+export function dataScript(historyText: string, journeysText = ""): string {
   const entries = parseHistory(historyText);
-  const stamp = createHash("sha1").update(historyText).digest("hex").slice(0, 12);
-  const payload = JSON.stringify({ stamp, generated: new Date().toISOString(), entries });
+  const journeys = journeysText ? parseJourneys(journeysText) : [];
+  const stamp = createHash("sha1").update(historyText).update("\0").update(journeysText).digest("hex").slice(0, 12);
+  const payload = JSON.stringify({ stamp, generated: new Date().toISOString(), entries, journeys });
   return `window.perfDashboard && window.perfDashboard(${payload.replace(/</g, "\\u003c")});\n`;
 }
 
@@ -77,7 +121,8 @@ export function dataScript(historyText: string): string {
 export function syncDashboard(historyPath: string, force = false): boolean {
   const { html, data } = dashboardPaths(historyPath);
   if (!force && !existsSync(html)) return false;
-  writeFileSync(data, dataScript(existsSync(historyPath) ? readFileSync(historyPath, "utf8") : ""));
+  const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : "");
+  writeFileSync(data, dataScript(read(historyPath), read(journeysPath(historyPath))));
   return true;
 }
 
@@ -103,6 +148,61 @@ export function labEntries(history: Entry[], budget: Values, measured: Values, t
   for (const [key, value] of measured)
     if (last(history, "lab", key) !== value) out.push({ t, kind: "lab", key, value, ...(version && { version }) });
   return out;
+}
+
+/**
+ * The field entries not recorded yet, so a report script can run as often as it likes: an entry
+ * is skipped when its journey (any of its keys) already has its statistic and version. One that
+ * repeats an earlier entry's key, statistic, version and `t` with at least half as many runs again
+ * is a re-report: it's added, and the dashboard draws only the later of the two.
+ */
+export function unrecorded(history: Entry[], journeys: Journey[], entries: Entry[]): Entry[] {
+  const journeyOf = new Map<string, string>();
+  for (const j of journeys) for (const m of [...j.members, j.key]) journeyOf.set(m, j.key);
+  const group = (key = "") => journeyOf.get(key) ?? key;
+  const known = history.filter((h) => h.kind === "field");
+  const out: Entry[] = [];
+  for (const e of entries) {
+    const same = known.filter((h) => h.version === e.version && (h.stat ?? "") === (e.stat ?? "") && group(h.key) === group(e.key));
+    const rereport =
+      same.length > 0 &&
+      same.every((h) => h.key === e.key && h.t === e.t && h.n !== undefined) &&
+      (e.n ?? 0) >= 1.5 * Math.max(...same.map((h) => h.n!));
+    if (same.length && !rereport) continue;
+    out.push(e);
+    known.push(e);
+  }
+  return out;
+}
+
+const HOOKS = ["post-merge", "post-checkout", "post-rewrite", "post-commit"];
+const HOOK_MARK = "# perf-hill-climb: keep the dashboard current";
+
+/**
+ * Adds a `sync` line to the repo's post-merge, post-checkout, post-rewrite and post-commit hooks,
+ * so results that arrive through git reach an open dashboard too. Keeps what the hooks already do
+ * and adds the line once. Returns the hooks it changed.
+ */
+export function installHooks(historyPath: string, scriptPath: string, runner: string): string[] {
+  const dir = dirname(resolve(historyPath));
+  const top = git(dir, ["rev-parse", "--show-toplevel"])?.trim();
+  const hooks = git(dir, ["rev-parse", "--git-path", "hooks"])?.trim();
+  if (!top || !hooks) throw new Error(`${dir} is not in a git repository`);
+  const hooksDir = resolve(dir, hooks);
+  mkdirSync(hooksDir, { recursive: true });
+  // Hooks run from the top of the working tree, so the paths are relative to it
+  const rel = (p: string) => relative(realpathSync(top), join(realpathSync(dirname(resolve(p))), basename(p)));
+  const line = `${runner} "${rel(scriptPath)}" sync "${rel(historyPath)}" >/dev/null 2>&1 || true  ${HOOK_MARK}`;
+  const changed: string[] = [];
+  for (const name of HOOKS) {
+    const p = join(hooksDir, name);
+    const text = existsSync(p) ? readFileSync(p, "utf8") : "#!/bin/sh\n";
+    if (text.includes(HOOK_MARK)) continue;
+    writeFileSync(p, text.replace(/\n*$/, "\n") + line + "\n");
+    chmodSync(p, 0o755);
+    changed.push(name);
+  }
+  return changed;
 }
 
 function git(cwd: string, args: string[]): string | undefined {
@@ -162,12 +262,16 @@ export function backfillEntries(history: Entry[], budgetPath: string): Entry[] {
   return out;
 }
 
+// Flags that take no value
+const SWITCHES = new Set(["once"]);
+
 function flags(args: string[]): { positional: string[]; opts: Record<string, string> } {
   const positional: string[] = [];
   const opts: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith("--")) opts[args[i].slice(2)] = args[++i] ?? "";
-    else positional.push(args[i]);
+    if (!args[i].startsWith("--")) positional.push(args[i]);
+    else if (SWITCHES.has(args[i].slice(2))) opts[args[i].slice(2)] = "true";
+    else opts[args[i].slice(2)] = args[++i] ?? "";
   }
   return { positional, opts };
 }
@@ -177,10 +281,12 @@ function readInput(path: string): string {
 }
 
 const USAGE = `usage:
-  history.ts field    <history> <measured|-> --version V [--stat S] [--n N] [--unit U] [--source S] [--better higher] [--note T] [--t ISO]
+  history.ts field    <history> <measured|-> --version V [--stat S] [--n N] [--unit U] [--source S] [--better higher] [--note T] [--t ISO] [--once]
   history.ts lab      <history> <budget> <measured|->
   history.ts event    <history> <label> [--type release|revert|note] [--version V] [--t ISO]
-  history.ts backfill <history> <budget>`;
+  history.ts backfill <history> <budget>
+  history.ts sync     <history>
+  history.ts hook     <history>`;
 
 export function main(argv: string[]): number {
   const [command, ...rest] = argv;
@@ -192,6 +298,22 @@ export function main(argv: string[]): number {
   }
   if (opts.t !== undefined && Number.isNaN(Date.parse(opts.t))) {
     console.error(`--t must be an ISO date, got: ${opts.t}`);
+    return 2;
+  }
+  if (command === "sync") {
+    const wrote = syncDashboard(historyPath);
+    console.log(wrote ? `HISTORY sync: ${dashboardPaths(historyPath).data} rewritten` : `HISTORY sync: no perf-dashboard.html next to ${historyPath}, nothing to do`);
+    return 0;
+  }
+  if (command === "hook") {
+    // The runtime running this writes the hook line: bun, or node with type stripping
+    const runner = (process.versions as { bun?: string }).bun ? "bun" : "node --experimental-strip-types";
+    const changed = installHooks(historyPath, fileURLToPath(import.meta.url), runner);
+    console.log(`HISTORY hook: ${changed.length ? `sync added to ${changed.join(", ")}` : "already in every hook"}`);
+    return 0;
+  }
+  if (opts.once !== undefined && (command !== "field" || !opts.version)) {
+    console.error("--once is for field results and needs --version");
     return 2;
   }
   const history = readHistory(historyPath);
@@ -215,6 +337,7 @@ export function main(argv: string[]): number {
       ...(better && { better }),
       ...(opts.note && { note: opts.note }),
     }));
+    if (opts.once) entries = unrecorded(history, readJourneys(historyPath), entries);
   } else if (command === "lab" && positional[1] && positional[2]) {
     const budget = parseBudget(readFileSync(positional[1], "utf8"));
     entries = labEntries(history, budget, parseMeasured(readInput(positional[2])), t, opts.version);

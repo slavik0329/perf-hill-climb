@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderHtml } from "./dashboard.ts";
-import { beforeValues, dataScript, parseHistory, readHistory, syncDashboard } from "./history.ts";
+import { beforeValues, dataScript, parseHistory, parseJourneys, readHistory, syncDashboard, unrecorded, type Entry } from "./history.ts";
 
 const HISTORY = join(import.meta.dir, "history.ts");
 const DASHBOARD = join(import.meta.dir, "dashboard.ts");
@@ -38,6 +38,38 @@ describe("beforeValues", () => {
       "e.plain          1",
     ].join("\n");
     expect([...beforeValues(text)]).toEqual([["a.blocked_ms", 1000], ["c.attempts", 17]]);
+  });
+});
+
+describe("parseJourneys", () => {
+  test("needs a key and members, and a key in one journey only", () => {
+    expect(parseJourneys('[{"key":"zap","members":["zap.a","zap.b"]}]')).toEqual([{ key: "zap", members: ["zap.a", "zap.b"] }]);
+    expect(() => parseJourneys("{")).toThrow("not JSON");
+    expect(() => parseJourneys('{"key":"zap"}')).toThrow("array");
+    expect(() => parseJourneys('[{"key":"zap","members":[]}]')).toThrow("journey 1");
+    expect(() => parseJourneys('[{"key":"a","members":["x"]},{"key":"b","members":["x"]}]')).toThrow("x is in both a and b");
+    expect(() => parseJourneys('[{"key":"a","members":["x"]},{"key":"x","members":["y"]}]')).toThrow("x is in both a and x");
+  });
+});
+
+describe("unrecorded", () => {
+  const f = (key: string, version: string, value: number, n: number, t = "2026-10-01T00:00:00.000Z", stat = "p50"): Entry =>
+    ({ t, kind: "field", key, value, stat, n, version });
+  const journeys = [{ key: "zap", members: ["zap.survey", "zap.total"] }];
+
+  test("skips a statistic and version its journey already has, under any of its keys", () => {
+    const history = [f("zap.survey", "1.1", 833, 26)];
+    expect(unrecorded(history, journeys, [f("zap.total", "1.1", 990, 45)])).toEqual([]);
+    expect(unrecorded(history, journeys, [f("zap.total", "1.2", 900, 40)])).toHaveLength(1);
+    expect(unrecorded(history, journeys, [f("zap.total", "1.1", 1500, 45, undefined, "p95")])).toHaveLength(1);
+    expect(unrecorded(history, [], [f("zap.total", "1.1", 990, 45)])).toHaveLength(1); // no journey: another key
+  });
+
+  test("adds a re-report of the same key, version and time once the runs grow by half", () => {
+    const history = [f("zap.total", "1.2", 900, 10)];
+    expect(unrecorded(history, journeys, [f("zap.total", "1.2", 910, 14)])).toEqual([]);
+    expect(unrecorded(history, journeys, [f("zap.total", "1.2", 910, 15)])).toEqual([f("zap.total", "1.2", 910, 15)]);
+    expect(unrecorded(history, journeys, [f("zap.total", "1.2", 910, 30, "2026-10-02T00:00:00.000Z")])).toEqual([]);
   });
 });
 
@@ -75,6 +107,14 @@ describe("history.ts CLI", () => {
     run(HISTORY, ["event", h, "1.3 released", "--type", "release", "--version", "1.3"]);
     const e = readHistory(h).at(-1)!;
     expect([e.kind, e.label, e.type, e.version]).toEqual(["event", "1.3 released", "release", "1.3"]);
+  });
+
+  test("field --once adds only what isn't recorded", () => {
+    const once = (input: string) => run(HISTORY, ["field", h, "-", "--version", "1.4", "--stat", "p50", "--n", "20", "--once", "--t", "2026-10-03T00:00:00Z"], input);
+    expect(once("api.get 300\n").stdout).toContain("1 entry added");
+    expect(once("api.get 300\napi.list 80\n").stdout).toContain("1 entry added");
+    expect(readHistory(h).slice(-2).map((e) => e.key)).toEqual(["api.get", "api.list"]);
+    expect(run(HISTORY, ["field", h, "-", "--once"], "api.get 1\n").status).toBe(2); // needs --version
   });
 
   test("usage errors exit 2", () => {
@@ -116,6 +156,36 @@ describe("backfill", () => {
   });
 });
 
+describe("hook", () => {
+  test("adds sync to the git hooks once, keeps what they did, and a commit refreshes the data", () => {
+    const repo = mkdtempSync(join(dir, "hook-"));
+    const git = (...args: string[]) =>
+      spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, encoding: "utf8" });
+    git("init", "-q", "-b", "main");
+    const hooks = join(repo, ".git", "hooks");
+    writeFileSync(join(hooks, "post-commit"), "#!/bin/sh\necho earlier hook\n");
+    const perf = join(repo, "perf");
+    spawnSync("mkdir", ["-p", perf]);
+    const hist = join(perf, "perf-history.jsonl");
+    writeFileSync(hist, "");
+    writeFileSync(join(perf, "perf-dashboard.html"), "");
+
+    expect(run(HISTORY, ["hook", "perf/perf-history.jsonl"], undefined, repo).stdout).toContain("post-merge, post-checkout, post-rewrite, post-commit");
+    expect(run(HISTORY, ["hook", hist], undefined, perf).stdout).toContain("already in every hook");
+    const postCommit = readFileSync(join(hooks, "post-commit"), "utf8");
+    expect(postCommit.startsWith("#!/bin/sh\necho earlier hook\n")).toBe(true);
+    expect(postCommit.match(/keep the dashboard current/g)).toHaveLength(1);
+    expect(readFileSync(join(hooks, "post-merge"), "utf8")).toMatch(/^#!\/bin\/sh\nbun ".*history\.ts" sync "perf\/perf-history\.jsonl"/);
+
+    // A result that arrives by commit, as it would by merge or pull, reaches the data file
+    writeFileSync(hist, '{"t":"2026-10-01T00:00:00Z","kind":"event","label":"from git"}\n');
+    git("add", ".");
+    const commit = git("commit", "-q", "-m", "result");
+    expect(commit.stdout + commit.stderr).toContain("earlier hook"); // git sends hook output to stderr
+    expect(readFileSync(join(perf, "perf-dashboard.data.js"), "utf8")).toContain('"label":"from git"');
+  });
+});
+
 describe("dashboard data and page", () => {
   test("the data file is JS that hands the entries to the page, with < escaped", () => {
     const text = '{"t":"2026-10-01T00:00:00Z","kind":"event","label":"</script><b>x"}\n';
@@ -146,6 +216,28 @@ describe("dashboard data and page", () => {
     run(HISTORY, ["event", hist, "second"], undefined, d);
     expect(readFileSync(join(d, "perf-dashboard.data.js"), "utf8")).toContain('"label":"second"');
     expect(syncDashboard(join(dir, "nowhere", "perf-history.jsonl"))).toBe(false);
+  });
+
+  test("the data file carries the journeys, and a journeys change redraws", () => {
+    const text = '{"t":"2026-10-01T00:00:00Z","kind":"field","key":"a","value":1}\n';
+    const journeys = '[{"key":"zap","title":"Channel change","members":["zap.survey","zap.total"]}]';
+    let got: { stamp: string; journeys: unknown[] } | undefined;
+    new Function("window", dataScript(text, journeys))({ perfDashboard: (p: typeof got) => (got = p) });
+    expect(got!.journeys).toEqual([{ key: "zap", title: "Channel change", members: ["zap.survey", "zap.total"] }]);
+    const stamp = (j: string) => dataScript(text, j).match(/"stamp":"(\w+)"/)![1];
+    expect(stamp(journeys)).not.toBe(stamp(""));
+  });
+
+  test("sync rewrites the data file, with perf-journeys.json, once a dashboard exists", () => {
+    const d = mkdtempSync(join(dir, "sync-"));
+    const hist = join(d, "perf-history.jsonl");
+    writeFileSync(hist, '{"t":"2026-10-01T00:00:00Z","kind":"field","key":"a","value":1}\n');
+    expect(run(HISTORY, ["sync", hist], undefined, d).stdout).toContain("nothing to do");
+    expect(existsSync(join(d, "perf-dashboard.data.js"))).toBe(false);
+    writeFileSync(join(d, "perf-dashboard.html"), "");
+    writeFileSync(join(d, "perf-journeys.json"), '[{"key":"j","members":["a"]}]');
+    expect(run(HISTORY, ["sync", hist], undefined, d).status).toBe(0);
+    expect(readFileSync(join(d, "perf-dashboard.data.js"), "utf8")).toContain('"journeys":[{"key":"j","members":["a"]}]');
   });
 
   test("the page script compiles", () => {

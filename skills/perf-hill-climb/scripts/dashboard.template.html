@@ -10,7 +10,7 @@
   --page: #f9f9f7; --surface-1: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
   --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11, 11, 11, 0.10);
   --good-text: #006300; --good: #0ca30c; --critical: #d03b3b;
-  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: var(--muted);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -18,7 +18,7 @@
     --page: #0d0d0d; --surface-1: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, 0.10);
     --good-text: #0ca30c;
-    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: var(--muted);
   }
 }
 :root[data-theme="dark"] {
@@ -26,7 +26,7 @@
   --page: #0d0d0d; --surface-1: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
   --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, 0.10);
   --good-text: #0ca30c;
-  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: var(--muted);
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--page); color: var(--ink); }
@@ -111,7 +111,7 @@ ol.timeline .when, ol.timeline .type { color: var(--ink-2); font-size: 13px; }
   const STAT_SLOT = { value: 1, p50: 1, mean: 2, p95: 3, p75: 4, p99: 5 };
   const HEADLINE = ["mean", "p50", "p75", "p95", "p99", "value"];
   const SVG = "http://www.w3.org/2000/svg";
-  const state = { stamp: null, entries: [], generated: null, lastOk: 0, lastTry: 0 };
+  const state = { stamp: null, entries: [], journeys: [], generated: null, lastOk: 0, lastTry: 0 };
 
   document.getElementById("title").textContent = TITLE;
 
@@ -121,6 +121,7 @@ ol.timeline .when, ol.timeline .type { color: var(--ink-2); font-size: 13px; }
     if (payload && payload.stamp !== state.stamp) {
       state.stamp = payload.stamp;
       state.entries = Array.isArray(payload.entries) ? payload.entries : [];
+      state.journeys = Array.isArray(payload.journeys) ? payload.journeys : [];
       state.generated = payload.generated;
       render();
     }
@@ -215,18 +216,30 @@ ol.timeline .when, ol.timeline .type { color: var(--ink-2); font-size: 13px; }
   const color = (slot) => "var(--s" + slot + ")";
 
   // ---------- model ----------
-  function model(entries) {
+  function model(entries, journeys) {
+    // A journey recorded under several keys is one metric; its own key counts as its last member
+    const journeyOf = new Map();
+    for (const j of journeys) {
+      const members = j.members.includes(j.key) ? j.members.slice() : j.members.concat(j.key);
+      for (const m of members) journeyOf.set(m, { key: j.key, title: j.title || "", members });
+    }
+    // A re-report (the same key, statistic, version and time again, with more runs) replaces the earlier line
+    const id = (e) => [e.key, e.stat || "value", e.version || "", e.t].join("|");
+    const latest = new Map();
+    entries.forEach((e, i) => { if (e.kind === "field") latest.set(id(e), i); });
     const sorted = entries
-      .map((e) => Object.assign({ time: Date.parse(e.t) }, e))
-      .filter((e) => Number.isFinite(e.time))
+      .map((e, i) => Object.assign({ time: Date.parse(e.t), index: i }, e))
+      .filter((e) => Number.isFinite(e.time) && (e.kind !== "field" || latest.get(id(e)) === e.index))
       .sort((a, b) => a.time - b.time);
     const field = new Map(), lab = new Map(), events = [];
     for (const e of sorted) {
       if (e.kind === "event") { events.push(e); continue; }
       if (typeof e.value !== "number" || !e.key) continue;
       if (e.kind === "field") {
-        let f = field.get(e.key);
-        if (!f) field.set(e.key, (f = { key: e.key, unit: "", better: "lower", stats: new Map() }));
+        const j = journeyOf.get(e.key) || null;
+        const key = j ? j.key : e.key;
+        let f = field.get(key);
+        if (!f) field.set(key, (f = { key, title: j ? j.title : "", journey: j, unit: "", better: "lower", stats: new Map(), others: [] }));
         if (e.unit) f.unit = e.unit;
         if (e.better) f.better = e.better;
         const stat = e.stat || "value";
@@ -236,6 +249,22 @@ ol.timeline .when, ol.timeline .type { color: var(--ink-2); font-size: 13px; }
         let l = lab.get(e.key);
         if (!l) lab.set(e.key, (l = { key: e.key, ceilings: [], measured: [] }));
         (e.kind === "ceiling" ? l.ceilings : l.measured).push({ time: e.time, v: e.value, e });
+      }
+    }
+    // Two of a journey's keys with a result for the same version: the line keeps the one listed
+    // first, and the other shows as a dot beside it
+    for (const f of field.values()) {
+      if (!f.journey) continue;
+      const rank = (p) => f.journey.members.indexOf(p.e.key);
+      for (const [stat, pts] of f.stats) {
+        const best = new Map();
+        for (const p of pts) {
+          const b = p.e.version && best.get(p.e.version);
+          if (p.e.version && (!b || rank(p) < rank(b))) best.set(p.e.version, p);
+        }
+        const keep = pts.filter((p) => !p.e.version || best.get(p.e.version) === p);
+        for (const p of pts) if (!keep.includes(p)) f.others.push(Object.assign({ stat }, p));
+        f.stats.set(stat, keep);
       }
     }
     // Release markers: explicit release/revert events, else the first time each version reported.
@@ -333,7 +362,7 @@ ol.timeline .when, ol.timeline .type { color: var(--ink-2); font-size: 13px; }
         const mx = x(mk.time);
         root.appendChild(svg("line", { x1: mx, x2: mx, y1: m.t - 4, y2: H - m.b, style: "stroke:var(--axis);stroke-width:1" }));
         const w = textWidth(mk.label);
-        if (mx - w / 2 > lastRight + 6 && mx + w / 2 < W) {
+        if (mx - w / 2 > Math.max(0, lastRight + 6) && mx + w / 2 < W) {
           const t = svg("text", { x: mx, y: m.t - 8, "text-anchor": "middle" });
           t.textContent = mk.label;
           root.appendChild(t);
@@ -405,6 +434,7 @@ ol.timeline .when, ol.timeline .type { color: var(--ink-2); font-size: 13px; }
           if (p.e.version && !version) version = p.e.version;
           if (o.series.length === 1 || !s.step) {
             const bits = [];
+            if (o.journey) bits.push(p.e.key);
             if (p.e.n) bits.push("n = " + p.e.n.toLocaleString());
             if (p.e.source && p.e.source !== "measured") bits.push(p.e.source);
             perSeries.push({ name: s.name, bits: bits.join(", "), note: p.e.note || "" });
@@ -451,7 +481,7 @@ ol.timeline .when, ol.timeline .type { color: var(--ink-2); font-size: 13px; }
   // ---------- sections ----------
   function render() {
     hideTip();
-    const { field, lab, events, markers } = model(state.entries);
+    const { field, lab, events, markers } = model(state.entries, state.journeys);
     renderSummary(field, lab);
     renderField(field, markers);
     renderLab(lab);
@@ -492,7 +522,7 @@ ol.timeline .when, ol.timeline .type { color: var(--ink-2); font-size: 13px; }
       const pts = f.stats.get(stat);
       const last = pts[pts.length - 1];
       const tile = el("div", "card tile");
-      tile.append(el("div", "label", f.key + (stat !== "value" ? " · " + stat : "") + (measured(last) ? "" : " · " + last.e.source)),
+      tile.append(el("div", "label", (f.title || f.key) + (stat !== "value" ? " · " + stat : "") + (measured(last) ? "" : " · " + last.e.source)),
         el("div", "value", withUnit(last.v, f.unit)));
       const g = gain(f);
       if (g) {
@@ -536,10 +566,15 @@ ol.timeline .when, ol.timeline .type { color: var(--ink-2); font-size: 13px; }
       const card = el("div", "card");
       const stats = [...f.stats.keys()].sort((a, b) => (STAT_SLOT[a] || 9) - (STAT_SLOT[b] || 9));
       const series = stats.map((s) => ({ name: s === "value" ? f.key : s, slot: STAT_SLOT[s] || 6, unit: f.unit, points: f.stats.get(s) }));
+      // A journey's other results for a build already on its line, as dots
+      const others = f.others.filter((p) => p.stat === headline(f));
+      if (others.length) series.push({ name: "same build, another key", slot: 7, dotsOnly: true, unit: f.unit, points: others });
+      const keys = new Set([...f.stats.values()].flat().concat(f.others).map((p) => p.e.key));
       const head = el("div", "chart-head");
       const titles = el("div");
-      titles.append(el("div", "chart-title", f.key),
-        el("div", "chart-sub", (f.better === "higher" ? "higher" : "lower") + " is better" + (f.unit ? " · " + f.unit : "")));
+      titles.append(el("div", "chart-title", f.title || f.key),
+        el("div", "chart-sub", (f.better === "higher" ? "higher" : "lower") + " is better" + (f.unit ? " · " + f.unit : "") +
+          (f.journey && keys.size > 1 ? " · " + keys.size + " keys joined" : "")));
       const plot = el("div", "plot");
       head.append(titles, tableToggle(card, plot, () => fieldTable(f, stats)));
       card.appendChild(head);
@@ -555,7 +590,7 @@ ol.timeline .when, ol.timeline .type { color: var(--ink-2); font-size: 13px; }
       }
       card.appendChild(plot);
       grid.appendChild(card);
-      chart(plot, { series, markers, height: 200, label: f.key });
+      chart(plot, { series, markers, height: 200, label: f.title || f.key, journey: !!f.journey });
     }
   }
 
@@ -564,16 +599,20 @@ ol.timeline .when, ol.timeline .type { color: var(--ink-2); font-size: 13px; }
     wrap.hidden = true;
     const table = el("table");
     const head = el("tr");
-    for (const h of ["When", "Version", "Statistic", "Value", "n", "Source", "Note"]) head.appendChild(el("th", h === "Value" || h === "n" ? "num" : "", h));
+    const cols = ["When", "Version"].concat(f.journey ? ["Key"] : [], ["Statistic", "Value", "n", "Source", "Note"]);
+    for (const h of cols) head.appendChild(el("th", h === "Value" || h === "n" ? "num" : "", h));
     table.appendChild(head);
     const rows = [];
-    for (const s of stats) for (const p of f.stats.get(s)) rows.push({ s, p });
+    for (const s of stats) for (const p of f.stats.get(s)) rows.push({ s, p, off: false });
+    for (const p of f.others) rows.push({ s: p.stat, p, off: true });
     rows.sort((a, b) => a.p.time - b.p.time);
-    for (const { s, p } of rows) {
+    for (const { s, p, off } of rows) {
       const tr = el("tr");
-      tr.append(el("td", "", fmtStamp(p.time)), el("td", "", p.e.version || ""), el("td", "", s),
-        el("td", "num", withUnit(p.v, f.unit)), el("td", "num", p.e.n ? p.e.n.toLocaleString() : ""),
-        el("td", "", p.e.source || "measured"), el("td", "", p.e.note || ""));
+      const note = (off ? "Not on the line: this build has a result under a key listed earlier. " : "") + (p.e.note || "");
+      tr.append(el("td", "", fmtStamp(p.time)), el("td", "", p.e.version || ""));
+      if (f.journey) tr.appendChild(el("td", "key", p.e.key));
+      tr.append(el("td", "", s), el("td", "num", withUnit(p.v, f.unit)), el("td", "num", p.e.n ? p.e.n.toLocaleString() : ""),
+        el("td", "", p.e.source || "measured"), el("td", "", note));
       table.appendChild(tr);
     }
     wrap.appendChild(table);

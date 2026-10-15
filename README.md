@@ -34,7 +34,7 @@ skills/perf-hill-climb/
 │   └── harness/              in-test budget checks, fake clock, counting fakes (TypeScript and C++)
 └── scripts/
     ├── ratchet.ts            budget check / lower / guard
-    ├── history.ts            append field results, lab counts, ceilings and releases to perf-history.jsonl
+    ├── history.ts            append field results, lab counts, ceilings and releases to perf-history.jsonl; git hook
     ├── dashboard.ts          write a live perf-dashboard.html next to the history (with dashboard.template.html)
     └── *.test.ts             bun test (harness.test.ts also compiles the C++ headers)
 ```
@@ -75,6 +75,7 @@ bun skills/perf-hill-climb/scripts/ratchet.ts lower perf-budget.txt measured.jso
 bun skills/perf-hill-climb/scripts/ratchet.ts guard perf-budget.txt origin/main
 bun skills/perf-hill-climb/scripts/history.ts lab perf-history.jsonl perf-budget.txt test.log
 bun skills/perf-hill-climb/scripts/dashboard.ts perf-history.jsonl --title "my-app"
+bun skills/perf-hill-climb/scripts/history.ts hook perf-history.jsonl   # results that arrive by git refresh it too
 open perf-dashboard.html   # redraws within 2 s of every history.ts write; no server needed
 ```
 
